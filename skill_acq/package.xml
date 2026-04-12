@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>skill_acq</name>
+  <version>0.0.0</version>
+  <description>Catalog-driven ROS skill acquisition and execution pipeline with local and global skill package registries.</description>
+  <maintainer email="nikhil@example.com">nikhil</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>python3</exec_depend>
+  <exec_depend>python3-pip</exec_depend>
+  <exec_depend>python3-rosdep</exec_depend>
+  <exec_depend>git</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
