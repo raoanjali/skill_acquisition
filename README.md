@@ -15,6 +15,54 @@ In short:
 `skill_acq` sits at the boundary between **missing-capability detection** and **runtime execution**. It can be used from multiple upstream autonomy stacks, but its boundary stays the same in all cases: it is invoked when some other module has already decided that the robot needs a capability, but there is no compatible live provider for that capability on the robot right now.
 
 
+## Capability discovery
+`skill_acq` uses a local-first discovery model.
+
+Local discovery
+The first step is always to check the local capability catalog for installed skills that are already available on the robot. This local-first behavior matters for two reasons:
+1. It avoids unnecessary downloads
+2. It lets the robot’s capability surface grow persistently over time
+
+Global discovery
+- If no compatible local match exists, skill_acq searches a curated global catalog of approved skills. This catalog is not a raw index of arbitrary repositories. It is a reviewed registry of known skills that include the metadata required for compatibility checking and runtime bringup.
+- Discovery is not purely semantic. A package that sounds correct in natural language is not useful if it cannot run on the target robot. For that reason, discovery is split into two stages:
+1. hard filtering
+2. semantic selection among compatible candidates
+
+Capability contracts
+Every skill must declare a machine-readable capability contract. In v1, compatibility is expressed primarily through a single platform_name.
+This keeps the interface simple for demo use and makes it easy for upstream modules to call skill_acq without needing to provide full embodiment metadata.
+v1 contract philosophy
+For the first version, the caller only needs to provide:
+platform_name
+requested capability
+optional execution parameters
+Future versions can extend this to support richer platform variants, sensor configurations, and compute requirements.
+Example capability contract
+{
+ "skill_id": "come_to_user",
+ "description": "Navigate toward the user until within a handoff distance.",
+ "platform_name": ["mars"],
+ "ros_distro": ["humble"],
+ "interfaces_exposed": {
+   "actions": ["come_to_user"]
+ },
+ "launch_target": "come_to_user.launch.py",
+ "validation": {
+   "type": "action_server_available",
+   "name": "/come_to_user"
+ }
+}
+Hard filtering fields for v1
+At minimum, a skill should declare:
+platform_name
+supported ROS distribution
+exposed ROS interface
+launch target
+validation method
+The purpose of the contract is not just to describe what the skill does, but to make it possible to filter out skills that are incompatible before any semantic matching occurs.
+
+
 
 ## Package Contents
 
