@@ -1,12 +1,20 @@
-# skill_acq
+# skill_acq : What this package is and is not
 
-`skill_acq` is a ROS 2 package that provides a catalog-driven skill acquisition pipeline. It lets a user describe a desired skill in natural language, asks an LLM to choose an appropriate action from compatible catalog candidates, installs or reuses the selected package in a runner workspace, validates the installation, and executes the selected target.
+`skill_acq` is a ROS2 package for **runtime skill acquisition**. It allows an upstream planner, agent, or executive layer to request a capability in natural language. `skill_acq` checks whether a compatible implementation already exists locally, and, if not, it acquires a compatible skill from a curated global catalog. The selected skill is then installed, validated, brought online, and made immediately available for execution via a ROS2 action. Once a skill has been acquired successfully, it is written back into the local catalog so future requests can resolve it locally.
 
-This package is intentionally separate from skill packages such as `reverse_string_action`. For the cloud-install flow, your ROS workspace only needs to contain:
+The goal of this package is not to be another task planner or robot executive. This package is **not** a task decomposition framework, a symbolic planner, or a general robot executive. It does not decide the full task sequence for the robot. Instead, its purpose is narrower: **turn a missing capability into a runnable ROS interface at runtime**. This package is also **not** a generic code-generation system or an unrestricted package search engine. The model does not invent packages or generate arbitrary runtime shell logic. It chooses among catalog candidates, and the executable behavior is defined by each skill package’s manifest.
 
-- `skill_acq`: the acquisition, selection, catalog, and execution pipeline
+You can find a demo here: https://www.youtube.com/watch?v=NsvAFBiPR-U 
 
-Skill packages can be installed on demand from the global catalog into the runner workspace. The example `reverse_string_action` package is hosted separately at `https://github.com/Nikkhil16/reverse_string_action`.
+In short:
+
+- **Upstream system**: decides what capability is needed next
+- **`skill_acq`**: decides how to make that capability runnable on this robot
+
+## Architecture
+`skill_acq` sits at the boundary between **missing-capability detection** and **runtime execution**. It can be used from multiple upstream autonomy stacks, but its boundary stays the same in all cases: it is invoked when some other module has already decided that the robot needs a capability, but there is no compatible live provider for that capability on the robot right now.
+
+
 
 ## Package Contents
 
