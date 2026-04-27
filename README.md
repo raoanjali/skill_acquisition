@@ -1,68 +1,12 @@
-# skill_acq : What this package is and is not
+# skill_acq
 
-`skill_acq` is a ROS2 package for **runtime skill acquisition**. It allows an upstream planner, agent, or executive layer to request a capability in natural language. `skill_acq` checks whether a compatible implementation already exists locally, and, if not, it acquires a compatible skill from a curated global catalog. The selected skill is then installed, validated, brought online, and made immediately available for execution via a ROS2 action. Once a skill has been acquired successfully, it is written back into the local catalog so future requests can resolve it locally.
+`skill_acq` is a ROS 2 package that provides a catalog-driven skill acquisition pipeline. It lets a user describe a desired skill in natural language, asks an LLM to choose an appropriate action from compatible catalog candidates, installs or reuses the selected package in a runner workspace, validates the installation, and executes the selected target.
 
-The goal of this package is not to be another task planner or robot executive. This package is **not** a task decomposition framework, a symbolic planner, or a general robot executive. It does not decide the full task sequence for the robot. Instead, its purpose is narrower: **turn a missing capability into a runnable ROS interface at runtime**. This package is also **not** a generic code-generation system or an unrestricted package search engine. The model does not invent packages or generate arbitrary runtime shell logic. It chooses among catalog candidates, and the executable behavior is defined by each skill package’s manifest.
+This package is intentionally separate from skill packages such as `reverse_string_action`. For the cloud-install flow, your ROS workspace only needs to contain:
 
-You can find a demo here: https://www.youtube.com/watch?v=NsvAFBiPR-U 
+- `skill_acq`: the acquisition, selection, catalog, and execution pipeline
 
-In short:
-
-- **Upstream system**: decides what capability is needed next
-- **`skill_acq`**: decides how to make that capability runnable on this robot
-
-## Architecture
-`skill_acq` sits at the boundary between **missing-capability detection** and **runtime execution**. It can be used from multiple upstream autonomy stacks, but its boundary stays the same in all cases: it is invoked when some other module has already decided that the robot needs a capability, but there is no compatible live provider for that capability on the robot right now.
-
-
-## Capability discovery
-`skill_acq` uses a local-first discovery model.
-
-Local discovery
-The first step is always to check the local capability catalog for installed skills that are already available on the robot. This local-first behavior matters for two reasons:
-1. It avoids unnecessary downloads
-2. It lets the robot’s capability surface grow persistently over time
-
-Global discovery
-- If no compatible local match exists, skill_acq searches a curated global catalog of approved skills. This catalog is not a raw index of arbitrary repositories. It is a reviewed registry of known skills that include the metadata required for compatibility checking and runtime bringup.
-- Discovery is not purely semantic. A package that sounds correct in natural language is not useful if it cannot run on the target robot. For that reason, discovery is split into two stages:
-1. hard filtering
-2. semantic selection among compatible candidates
-
-Capability contracts
-Every skill must declare a machine-readable capability contract. In v1, compatibility is expressed primarily through a single platform_name.
-This keeps the interface simple for demo use and makes it easy for upstream modules to call skill_acq without needing to provide full embodiment metadata.
-v1 contract philosophy
-For the first version, the caller only needs to provide:
-platform_name
-requested capability
-optional execution parameters
-Future versions can extend this to support richer platform variants, sensor configurations, and compute requirements.
-Example capability contract
-{
- "skill_id": "come_to_user",
- "description": "Navigate toward the user until within a handoff distance.",
- "platform_name": ["mars"],
- "ros_distro": ["humble"],
- "interfaces_exposed": {
-   "actions": ["come_to_user"]
- },
- "launch_target": "come_to_user.launch.py",
- "validation": {
-   "type": "action_server_available",
-   "name": "/come_to_user"
- }
-}
-Hard filtering fields for v1
-At minimum, a skill should declare:
-platform_name
-supported ROS distribution
-exposed ROS interface
-launch target
-validation method
-The purpose of the contract is not just to describe what the skill does, but to make it possible to filter out skills that are incompatible before any semantic matching occurs.
-
-
+Skill packages can be installed on demand from the global catalog into the runner workspace. The example `reverse_string_action` package is hosted separately at `https://github.com/Nikkhil16/reverse_string_action`.
 
 ## Package Contents
 
