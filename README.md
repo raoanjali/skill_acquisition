@@ -1,357 +1,431 @@
-# skill_acq : What this package is and is not
+# skill_acq
 
-`skill_acq` is a ROS2 package for **runtime skill acquisition**. It allows an upstream planner, agent, or executive layer to request a capability in natural language. `skill_acq` checks whether a compatible implementation already exists locally, and, if not, it acquires a compatible skill from a curated global catalog. The selected skill is then installed, validated, brought online, and made immediately available for execution via a ROS2 action. Once a skill has been acquired successfully, it is written back into the local catalog so future requests can resolve it locally.
+`skill_acq` is a ROS 2 package for **runtime skill acquisition**.
 
-The goal of this package is not to be another task planner or robot executive. This package is **not** a task decomposition framework, a symbolic planner, or a general robot executive. It does not decide the full task sequence for the robot. Instead, its purpose is narrower: **turn a missing capability into a runnable ROS interface at runtime**. This package is also **not** a generic code-generation system or an unrestricted package search engine. The model does not invent packages or generate arbitrary runtime shell logic. It chooses among catalog candidates, and the executable behavior is defined by each skill package’s manifest.
+When an upstream planner, agent, or executive layer determines that the robot needs a capability that is not available in the active ROS graph, `skill_acq` checks whether a compatible implementation already exists locally. If not, it retrieves one from a curated global catalog, installs it, validates that the promised ROS interface is live, and makes it available for execution. Successfully acquired skills are written back into the local catalog so future requests can resolve locally.
 
-You can find a demo here: https://www.youtube.com/watch?v=NsvAFBiPR-U 
+The goal is simple: **turn a missing capability into a runnable ROS action at runtime**.
 
-In short:
+---
 
-- **Upstream system**: decides what capability is needed next
-- **`skill_acq`**: decides how to make that capability runnable on this robot
+## Current Status (V0 Prototype) & Roadmap
 
-## Architecture
-`skill_acq` sits at the boundary between **missing-capability detection** and **runtime execution**. It can be used from multiple upstream autonomy stacks, but its boundary stays the same in all cases: it is invoked when some other module has already decided that the robot needs a capability, but there is no compatible live provider for that capability on the robot right now.
+This repository currently reflects the **V0 prototype**, with foundational architecture developed to address dynamic skill loading. We are actively migrating the core acquisition loop toward the formal V1 capability contract model described below.
 
+* **Immediate Testing:** The `reverse_string_action` package serves as the minimal reproducible baseline for the fetch-build-validate pipeline.
+* **Hardware Validation:** The dynamic acquisition and execution pipeline has been successfully tested on Innate's MARS platform using the `come_to_user` capability. [Watch the MARS platform demonstration on YouTube here](https://www.youtube.com/watch?v=NsvAFBiPR-U).
 
-## Capability discovery
-`skill_acq` uses a local-first discovery model.
+Please refer to the GitHub Issues tracker for current milestones regarding the V1 release, including structured platform variants and automated capability resolution.
 
-Local discovery
-The first step is always to check the local capability catalog for installed skills that are already available on the robot. This local-first behavior matters for two reasons:
-1. It avoids unnecessary downloads
-2. It lets the robot’s capability surface grow persistently over time
+---
 
-Global discovery
-- If no compatible local match exists, skill_acq searches a curated global catalog of approved skills. This catalog is not a raw index of arbitrary repositories. It is a reviewed registry of known skills that include the metadata required for compatibility checking and runtime bringup.
-- Discovery is not purely semantic. A package that sounds correct in natural language is not useful if it cannot run on the target robot. For that reason, discovery is split into two stages:
-1. hard filtering
-2. semantic selection among compatible candidates
+## Installation and Quickstart
 
-Capability contracts
-Every skill must declare a machine-readable capability contract. In v1, compatibility is expressed primarily through a single platform_name.
-This keeps the interface simple for demo use and makes it easy for upstream modules to call skill_acq without needing to provide full embodiment metadata.
-v1 contract philosophy
-For the first version, the caller only needs to provide:
-platform_name
-requested capability
-optional execution parameters
-Future versions can extend this to support richer platform variants, sensor configurations, and compute requirements.
-Example capability contract
-{
- "skill_id": "come_to_user",
- "description": "Navigate toward the user until within a handoff distance.",
- "platform_name": ["mars"],
- "ros_distro": ["humble"],
- "interfaces_exposed": {
-   "actions": ["come_to_user"]
- },
- "launch_target": "come_to_user.launch.py",
- "validation": {
-   "type": "action_server_available",
-   "name": "/come_to_user"
- }
-}
-Hard filtering fields for v1
-At minimum, a skill should declare:
-platform_name
-supported ROS distribution
-exposed ROS interface
-launch target
-validation method
-The purpose of the contract is not just to describe what the skill does, but to make it possible to filter out skills that are incompatible before any semantic matching occurs.
-
-
-
-## Package Contents
-
-- `scripts/skill_acq.py`: Main user-facing entry point. It accepts a natural-language request, calls the selector helper, and runs the selected target through the runner helper.
-- `scripts/select_ros_target.py`: Provides the importable `select_best_target()` helper, reads `package_catalog.db`, filters targets by system compatibility, optionally asks an OpenAI model to choose among compatible candidates, and can still run as a standalone CLI.
-- `scripts/run_ros_target.py`: Provides the importable `run_target()` helper, stages a package from a local path or cloud repo, checks whether it is already installed in the runner workspace, builds if needed, starts target processes, calls the target client, and can still run as a standalone CLI.
-- `scripts/build_package_catalog.py`: Rebuilds the local catalog by scanning for `package_runner.json` manifests.
-- `scripts/package_catalog.py`: Shared library for catalog schema creation, manifest extraction, compatibility checks, full-text ranking helpers, and DB access.
-- `package_catalog.db`: Packaged SQLite catalog used by default. It can start empty; cloud installs add successful packages later.
-- `global_package_catalog.json`: Packaged seed registry of cloneable skill packages used when the local catalog has no satisfying action. The default runtime global catalog URL is `https://raw.githubusercontent.com/Nikkhil16/Demo/main/global_package_catalog.json`.
-
-## How The Pipeline Works
-
-1. A skill package provides a `package_runner.json` manifest.
-2. `build_package_catalog.py` indexes local manifests into `package_catalog.db`.
-3. The user calls `skill_acq.py` with a natural-language request.
-4. `skill_acq.py` calls the `select_best_target()` helper with that request.
-5. `select_ros_target.py` filters the local catalog by hard constraints such as OS, ROS distro, required commands, hardware, robot requirements, and safety/resource requirements.
-6. The LLM is asked whether any compatible local action can satisfy the request. If yes, that package target is selected.
-7. If the LLM says no local action satisfies the request, `select_ros_target.py` loads `global_package_catalog.json`, filters it by the same hard constraints, and asks the LLM to choose from those global candidates.
-8. `skill_acq.py` prints each major pipeline step, then calls the `run_target()` helper with the selected package and target. Local selections use the local package path; global selections use the package `repo_url` and optional git ref from the global catalog.
-9. `run_ros_target.py` stages the package into the runner workspace, skips the build only if ROS can find the package and the install stamp still matches the staged source, otherwise installs manifest-declared Python requirements, builds it, validates that ROS can find the package after sourcing the runner overlay, starts required processes, and runs the target client.
-
-The action call is manifest-driven. The LLM chooses the package, target, and action server, but it does not generate arbitrary shell scripts. The actual client command comes from `package_runner.json`, which is safer and repeatable. The selector and runner scripts are still available as CLI tools for debugging, but the main `skill_acq.py` pipeline now uses Python helper functions instead of shelling out to sibling scripts.
-
-Skill packages can ask the runner to install ROS/system dependencies from `package.xml` with top-level `"rosdep_install": true` in `package_runner.json`. During installation, the runner runs `rosdep install --from-paths <staged-package> --ignore-src -r -y` before `colcon build`. Set `SKILL_ACQ_ROSDEP_INSTALL_ARGS` to append extra rosdep arguments.
-
-Skill packages can declare pip requirements with a top-level `python_requirements` list in `package_runner.json`, for example `"python_requirements": ["requirements.txt"]`. During installation, the runner installs each listed file from the staged package root with `python3 -m pip install --user -r ...` before running `colcon build`. Set `SKILL_ACQ_PIP_INSTALL_ARGS` to override the pip arguments, for example `SKILL_ACQ_PIP_INSTALL_ARGS=""` inside a virtual environment.
-
-The default runner workspace is `~/.ros/skill_acq/ros_runner_ws`. Override it with `--workspace-dir` or by setting `SKILL_ACQ_RUNNER_WS`. Downloaded cloud packages are staged and built there, not in your main ROS workspace.
-
-## Build
-
-From the ROS workspace root:
+Ensure you have a standard ROS 2 workspace (e.g., Ubuntu 22.04 with ROS 2 Humble or Jazzy) and clone the repository.
 
 ```bash
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+git clone [https://github.com/raoanjali/skill_acq.git](https://github.com/raoanjali/skill_acq.git)
+cd ~/ros2_ws
 colcon build --packages-select skill_acq
 source install/setup.bash
 ```
 
-For a local development demo where `reverse_string_action` is also present in the same workspace, you may build both packages. For the intended cloud-install test, build only `skill_acq` and let the global catalog fetch `reverse_string_action`.
+---
 
-## Rebuild The Local Catalog
+## What this package is and is not
 
-The catalog database is generated from `package_runner.json` files. Rebuild it after adding or editing local skill manifests:
+`skill_acq` is a **capability-resolution and acquisition layer**. It runs only after some other part of the system has already decided what capability is needed.
 
-```bash
-ros2 run skill_acq build_package_catalog.py --root /home/nikhil/workspace/RoboUniversity/RoboUniversity
+It is **not**:
+- a task planner
+- a task decomposition framework
+- a general robot executive
+- an unrestricted package search engine
+- a code-generation system
+
+In short:
+- **upstream modules** decide what the robot should do next
+- **`skill_acq`** decides how to make the required capability runnable on this robot
+
+---
+
+## Architecture
+
+`skill_acq` sits between **missing-capability detection** and **runtime execution**.
+
+Its boundary is the same across autonomy stacks:
+
+> a required capability has already been identified, but there is no compatible live provider for it on the robot right now
+
+That is when `skill_acq` begins.
+
+### Integration patterns
+
+#### 1. Planner-driven stack
+A symbolic planner or executor calls `skill_acq` when execution reaches an action with no compatible implementation.
+
+#### 2. Agent-driven stack
+An LLM agent exposes `skill_acq` as a tool such as `resolve_capability(...)`. If current tools are insufficient, the agent invokes that tool to acquire the missing capability.
+
+#### 3. Executive-layer stack
+An executive layer exposes `skill_acq` as an affordance or tool adapter such as `acquire_capability(...)`. If the current affordance set is insufficient, it invokes `skill_acq`, refreshes its capability view, and continues execution.
+
+### Why the boundary is the same
+
+The upstream framework may differ, but the handoff condition does not. Upstream components answer:
+
+**“What capability is needed next?”**
+
+`skill_acq` answers:
+
+**“How do I make that capability runnable on this robot?”**
+
+The reply from `skill_acq` is `True` (if a skill was found and its installation was successfully validated) or `False` (if no matching skill was found or installation failed).
+
+### Architecture diagram & Core acquisition flow
+
+```mermaid
+graph TD
+    A[Upstream Request] --> B{Local Catalog Check}
+    B -->|Match Found| F[Validate & Launch]
+    B -->|No Match| C[Global Catalog Search]
+    C --> D[Hard Compatibility Filter]
+    D --> E[Download, Install & Build]
+    E --> F
+    F --> G[Return Live ROS Interface]
 ```
 
-The default catalog path is `skill_acq/package_catalog.db` when running from source. When installed, the database is installed under the package share directory, but the scripts still work with an explicit `--db-path` if you want to control the catalog location.
+1. An upstream module requests a capability and provides `platform_name`.
+2. `skill_acq` checks the local catalog first.
+3. Candidates are filtered using hard compatibility constraints.
+4. If no compatible local skill exists, `skill_acq` searches the curated global catalog.
+5. If a global skill is selected, `skill_acq` can require explicit approval before installation.
+6. The selected skill is downloaded into a runner workspace.
+7. Dependencies are installed and the package is built if needed.
+8. The system validates that the promised ROS interface actually comes online.
+9. The newly acquired skill is added to the local catalog.
+10. A runnable capability is returned to the caller.
 
-## Run A Skill From Natural Language
+### Installation confirmation
+Compatible local skills can be used directly. If no compatible local skill exists and global acquisition is required, `skill_acq` can require explicit confirmation before download and install. A confirmation prompt should show:
+- selected `skill_id`
+- source repository or artifact
+- pinned commit hash or immutable version
+- declared `platform_name`
+- exposed ROS interface
 
-Example request:
+*Automated workflows can bypass this explicitly, for example through an auto-approve flag or parameter.*
 
-```bash
-ros2 run skill_acq skill_acq.py \
-  'reverse the string "hello"' \
-  --set publish_topic=/rev_string
+---
+
+## Capability Discovery
+
+`skill_acq` uses a local-first discovery model.
+
+### Local discovery
+The first step is always to check the local capability catalog for installed skills already available on the robot. This avoids unnecessary downloads and lets the robot’s capability surface grow persistently over time.
+
+### Global discovery
+If no compatible local match exists, `skill_acq` searches a curated global catalog of approved skills. This catalog is not a raw index of arbitrary repositories; it is a reviewed registry of skills that include the metadata required for compatibility checking and runtime bringup.
+
+### Discovery mechanics
+Discovery is not purely semantic. A package that sounds correct in natural language is not useful if it cannot run on the target robot. Discovery is therefore split into:
+1. **Hard filtering:** Ensuring platform and ROS distribution match.
+2. **Semantic selection among compatible candidates:** Once candidates successfully pass the hard compatibility filter, the discovery mechanism **iterates through all exposed actions for all nodes** listed within those candidate packages to find the optimal semantic match against the original request.
+
+---
+
+## Capability Contracts
+
+Every skill must declare a machine-readable capability contract.
+
+In v1, compatibility is expressed primarily through a single `platform_name`. This keeps the interface simple and makes it easy for upstream modules to call `skill_acq` without providing full embodiment metadata. Support for platform variants, structured robot profiles, and richer hardware constraints is planned for a future version.
+
+### Hardware-Agnostic Skills
+For software-only skills that do not rely on specific kinematics or sensors (e.g., pure software data manipulation or generic math nodes), the contract must explicitly declare hardware independence using a wildcard. Do not leave the field blank.
+* Specify `"platform_name": ["all"]` to bypass hardware restrictions.
+
+### Required contract fields for v1
+At minimum, a skill should declare:
+- `skill_id`
+- `platform_name`
+- `ros_distro`
+- `aliases`
+- `keywords`
+- `description`
+- the ROS interface it exposes (`interfaces_exposed`)
+- the launch target
+- the validation method
+
+### Why the contract matters
+The contract does more than describe the skill. It lets `skill_acq` filter out incompatible candidates before semantic or lexical selection, and it declares which ROS interface is expected to come online after launch.
+
+### Example capability contract
+```json
+{
+  "skill_id": "come_to_user",
+  "platform_name": ["mars", "turtlebot3"],
+  "ros_distro": ["humble", "jazzy"],
+  "aliases": [
+    "approach user",
+    "go to user",
+    "move to person"
+  ],
+  "keywords": [
+    "navigation",
+    "person"
+  ],
+  "description": "Navigate toward the user until within handoff distance.",
+  "interfaces_exposed": {
+    "actions": ["/come_to_user"]
+  },
+  "launch_target": "come_to_user.launch.py",
+  "validation": {
+    "type": "action_server_available",
+    "name": "/come_to_user"
+  }
+}
 ```
 
-Expected result for the `reverse_string_action` example is a successful target call that reports:
+---
+
+## Skill Acquisition: Download, Install, Validation
+
+Once a compatible skill has been selected, `skill_acq` turns it into a runnable capability through a manifest-driven pipeline.
+
+### Acquisition steps
+1. Select a compatible local or global skill
+2. Stage the package into the runner workspace
+3. Install dependencies
+4. Build the package if needed
+5. Launch the declared target
+6. Validate that the promised ROS interface is live
+7. Return a runnable provider to the caller
+
+### Why validation matters
+Installation alone is not enough. A skill is useful only if the system can verify that the promised interface is actually available after launch. Examples of validation:
+- action server appears
+- service becomes available
+- required node is running
+- expected topic is live
+
+If validation fails, the skill must not be treated as available.
+
+### Interface binding
+Each skill contract declares the ROS interface it is expected to bring online, such as an action name or service name. During acquisition, `skill_acq` installs and launches the selected package, validates that the declared interface is live, and returns that runnable interface to the caller.
+
+---
+
+## Deterministic Fallback Selection
+
+`skill_acq` does not require a cloud model to function. When no LLM provider is configured, `skill_acq` falls back to deterministic selection after hard compatibility filtering.
+
+### Metadata used for deterministic selection
+The fallback relies on semantic metadata:
+- `skill_id`
+- `aliases`
+- `keywords`
+- `description`
+
+*(Note: The `interfaces_exposed` and `validation` fields are used strictly for post-launch health checks, not for resolving the initial semantic request).*
+
+### Selection behavior
+Deterministic selection prefers:
+1. exact `skill_id` match
+2. exact alias match
+3. exact normalized title or capability match
+4. lexical overlap over aliases, keywords, and description
+5. local installed skills over global candidates
+6. previously validated skills over never-run candidates
+
+### Safe failure behavior
+If no candidate passes a minimum threshold, or if multiple candidates remain too close to distinguish safely, then `skill_acq` returns an explicit:
+- `no_match`, or
+- `ambiguous_match`
+
+instead of guessing. If `no_match` is found, a `False` failure flag is returned to the upstream component that called `skill_acq`. This keeps selection conservative and auditable.
+
+---
+
+## Optional LLM Configuration
+
+`skill_acq` can use an LLM provider for semantic ranking after hard compatibility filtering. This is optional. If no API key is configured, `skill_acq` still works using deterministic matching over compatible candidates.
+
+### How configuration works
+The API key is read by `skill_acq` itself at startup. Downloaded skill packages do not request, store, or manage model API keys. Set the provider and key in the environment before launching `skill_acq`.
+
+**OpenAI**
+```bash
+export SKILL_ACQ_LLM_PROVIDER=openai
+export OPENAI_API_KEY="your_key_here"
+```
+
+**Gemini**
+```bash
+export SKILL_ACQ_LLM_PROVIDER=gemini
+export GEMINI_API_KEY="your_key_here"
+```
+
+### Behavior when no key is set
+If no supported API key is found, `skill_acq` skips semantic ranking and falls back to hard filtering plus deterministic selection. This keeps runtime skill acquisition usable in offline, restricted, or non-cloud deployments.
+
+---
+
+## Updating the Global Skill Catalog
+
+The global skill catalog is intentionally curated. `skill_acq` does not install packages directly from arbitrary repositories at runtime. Instead, developers submit skill repositories for review, and only approved entries are added to the catalog.
+
+### Submission flow
+1. A developer submits a repository or release for review.
+2. An automated script checks that required metadata is present.
+3. The maintainer reviews the package manually.
+4. If approved, the package is added to the catalog as a version-pinned entry.
+
+### Why pinning matters
+Approved catalog entries must point to a specific immutable version, such as a commit hash which has been verified by the maintainer. The system should never install from a moving branch such as `main`.
+
+### What the automated check should verify
+At minimum, a submitted skill should include:
+- a machine-readable capability contract
+- supported `platform_name`
+- ROS compatibility information
+- launch target
+- validation instructions
+- repository URL
+- pinned commit or artifact reference
+- license
+
+### What the manual review is for
+Manual review is the trust mechanism in v1. It helps answer questions like:
+- does the package appear to do what it claims?
+- are the declared requirements reasonable?
+- is the launch and validation path reproducible?
+- is this appropriate to distribute through the catalog?
+
+### Example catalog entry
+```json
+{
+  "skill_id": "come_to_user",
+  "repo_url": "[https://github.com/example/come_to_user](https://github.com/example/come_to_user)",
+  "git_commit": "0123456789abcdef0123456789abcdef01234567",
+  "platform_name": ["mars", "turtlebot3"],
+  "ros_distro": ["humble", "jazzy"],
+  "launch_target": "come_to_user.launch.py",
+  "validation": {
+    "type": "action_server_available",
+    "name": "/come_to_user"
+  }
+}
+```
+
+---
+
+## Why this matters for ROS 2 developers
+
+ROS 2 already has modular software, packages, and reusable stacks. The missing systems problem is not whether robot software can be modular; it is whether a robot can detect that it is missing a capability, find a compatible implementation, and bring it online as part of a running system.
+
+That is the gap `skill_acq` is intended to address. This matters because it enables a different way to think about robot capability development:
+- a robot does not need every behavior preinstalled
+- capabilities can be added when needed
+- compatibility can be enforced before selection
+- successful acquisitions persist into future requests
+- a curated ecosystem of third-party skills becomes possible
+
+For ROS 2 developers, this means a skill can be packaged not just as source code, but as a discoverable, installable, and runnable capability.
+
+---
+
+## Repository structure
 
 ```text
-Reversed string: 'olleh'
+skill_acq/
+├── scripts/
+│   ├── skill_acq.py               # Main request entry point
+│   ├── select_ros_target.py       # Candidate resolution post-filtering
+│   ├── run_ros_target.py          # Staging, building, and validation logic
+│   ├── build_package_catalog.py   # Local database rebuild utility
+│   └── package_catalog.py         # Shared SQLite handlers and compatibility logic
+├── package_catalog.db             # Local persistent capability registry
+└── global_package_catalog.json    # Curated registry of approved global skills
 ```
 
-You can also run from source without installing the `skill_acq` package:
+---
+
+## Example usage
+
+`skill_acq` should be called by a BT node or within a tool call in a framework like ROSA.
 
 ```bash
-python3 /home/nikhil/workspace/RoboUniversity/RoboUniversity/skill_acq/scripts/skill_acq.py \
-  'reverse the string "hello"' \
-  --set publish_topic=/rev_string
+ros2 run skill_acq skill_acq.py "come to the user" --platform-name mars --ros-version jazzy 
 ```
 
-For the reverse-string example, the output topic must be supplied by the user. Use `--set publish_topic=/your_topic` to choose where the server publishes the reversed string.
-
-During execution, `skill_acq.py` prints progress messages such as "Looking for package locally", "Found a matching global package target", "Downloading package from ...", and "Installing or reusing package ...". These messages are meant to make it clear whether the pipeline is selecting, downloading, building, starting the server, or calling the client.
-
-## OpenAI-Based Target Selection
-
-The selector always starts with the local catalog and local compatibility checks. It does not ask a model to invent packages. The OpenAI step only chooses among candidates that already exist in `package_catalog.db` or in the configured global catalog, and that passed system compatibility checks.
-
-Default behavior:
-
-- `--selection-backend openai`: require OpenAI and fail if `OPENAI_API_KEY` is missing.
-- `--selection-backend catalog`: never call OpenAI.
-- `--selection-backend auto`: use OpenAI if `OPENAI_API_KEY` is available; otherwise use catalog ranking.
-
-Set your API key in the shell before running:
+### Action Remapping
+Optionally, the upstream process can dynamically overwrite the expected ROS action namespace during bringup to suit complex fleet routing.
 
 ```bash
-export OPENAI_API_KEY="your_api_key_here"
+ros2 run skill_acq skill_acq.py "come to the user" --platform-name mars --ros-version jazzy --remap-action /come_to_user:=/custom_namespace/come_to_user
 ```
 
-Then run:
+---
 
-```bash
-ros2 run skill_acq skill_acq.py \
-  'reverse the string "hello"' \
-  --selection-backend openai \
-  --set publish_topic=/rev_string
-```
+## Sample skills
 
-The default OpenAI model is a GPT-4-class model configured by `select_ros_target.py`. You can override it:
+Two simple examples illustrate the architecture.
 
-```bash
-ros2 run skill_acq skill_acq.py \
-  'reverse the string "hello"' \
-  --selection-backend openai \
-  --openai-model gpt-4o-2024-08-06 \
-  --set publish_topic=/rev_string
-```
+### 1. `reverse_string_action`
+A deliberately simple skill used to prove the acquisition loop itself. On the first request, the skill is acquired globally. On later requests, it is resolved locally.
 
-You can also set a default model with:
+### 2. `come_to_user`
+A more embodied example where the system acquires a robot-facing skill, installs it, validates the ROS interface, and then executes the behavior on a robot.
 
-```bash
-export SKILL_ACQ_OPENAI_MODEL="gpt-4o-2024-08-06"
-```
+Together these show:
+- persistent acquisition in a controlled setting
+- acquisition resulting in a live robot capability
 
-The OpenAI response is validated before use. The selected package name, target name, and action server name must match one of the compatible catalog candidates. When the model can infer manifest-declared input values unambiguously from the request, those values are used unless the user already supplied an explicit `--set NAME=VALUE`.
+---
 
-Catalog-only mode uses a minimum semantic score so an unrelated local package is not run just because it is technically compatible. The default is `0.03`:
+## Roadmap / future work
 
-```bash
-ros2 run skill_acq skill_acq.py \
-  'reverse the string "hello"' \
-  --selection-backend catalog \
-  --min-catalog-score 0.03 \
-  --set publish_topic=/rev_string
-```
+The current prototype focuses on a practical v1 architecture:
+- local-first capability resolution
+- hard compatibility filtering
+- curated global acquisition
+- pinned versions
+- manifest-driven installation
+- runtime validation
 
-## Global Package Catalog
+Planned next steps include:
+- richer capability contracts with structured platform variants beyond a single `platform_name`
+- stronger platform profiling and automatic profile resolution
+- immutable skill artifact hosting beyond source repositories
+- more automated global catalog submission and review workflows
+- improved runtime lifecycle management, health monitoring, and rollback behavior
 
-The global catalog is a JSON registry of packages that may not be installed locally yet. It is not a build artifact and it is not the installed package itself. Each entry should provide enough metadata to decide whether the package can be installed and whether one of its action servers can satisfy a user request.
+---
 
-The local packaged seed catalog lives at:
+## Contributions
 
-```text
-skill_acq/global_package_catalog.json
-```
+Contributions are welcome. Good contributions include:
+- new skill packages with clear capability contracts
+- improvements to compatibility checking
+- stronger validation and readiness detection
+- safer catalog tooling
+- better runner isolation and failure handling
+- additional demo skills for new robot platforms
 
-The selector accepts either a local file path or an HTTP(S) URL:
+### Submitting a skill to the global catalog
+For now, global catalog inclusion is manual. To submit a skill:
+1. send the repository URL and pinned commit hash to the maintainer
+2. make sure the repository includes the required manifest and compatibility metadata
+3. include clear launch and validation instructions
+4. include the supported `platform_name` values and ROS distribution
 
-```bash
-ros2 run skill_acq skill_acq.py \
-  'reverse the string "hello"' \
-  --set publish_topic=/rev_string \
-  --global-catalog-path https://raw.githubusercontent.com/Nikkhil16/Demo/main/global_package_catalog.json
-```
+**Maintainer contact:** `10.anjalirao@gmail.com`
 
-That GitHub raw URL is the default, so you only need `--global-catalog-path` if you want to test a different registry. You can also override the default for a whole shell session:
+---
 
-```bash
-export SKILL_ACQ_GLOBAL_CATALOG_URL="https://raw.githubusercontent.com/Nikkhil16/Demo/main/global_package_catalog.json"
-```
+## License
 
-Recommended hosted location:
-
-- Use a separate GitHub repository for the global registry when you want the package list to be maintained independently from the `skill_acq` package code.
-- Keep the registry as a plain JSON file. The current default expects it at the repo root as `global_package_catalog.json` in `https://github.com/Nikkhil16/Demo`.
-- Serve it through GitHub raw content or GitHub Pages when clients need to fetch updates.
-- Pin or version the registry schema with `global_catalog_schema_version` or `schema_version`.
-- Include a `source` object for each package with `type`, `url`, and `manifest_path`. Use a stable `commit`, `tag`, or explicit `ref` when you want to pin the checkout. `default_branch` is treated as descriptive metadata; if no pin is supplied, Git clones the repository's actual default branch.
-- Prefer pull requests for adding packages so entries can be reviewed for safety, requirements, and installability.
-
-Keeping the global registry separate is a good fit for your flow: the robot can fetch a simple JSON package list while the `skill_acq` package keeps the code that validates, installs, and runs entries. The main requirement is to version the registry schema and review new entries carefully because a registry entry can cause code to be cloned and built.
-
-## Hard Constraints To Put In Manifests
-
-The current manifest schema now supports these hard-constraint groups:
-
-- `platform_requirements`: OS, Ubuntu/platform tags, architecture, ROS distro, and similar platform facts.
-- `system_requirements`: required commands, generic hardware tags, GPU flag, and notes.
-- `robot_requirements`: robot types, required robot capabilities, sensors, actuators, TF frames, and notes.
-- `hard_requirements.resource_requirements`: memory, free disk, accelerators, and GPU needs.
-- `hard_requirements.runtime_requirements`: required environment variables, sudo/root needs, realtime kernel needs, required ROS nodes, topics, services, and actions.
-- `hard_requirements.network_requirements`: internet requirement and outbound hosts.
-- `hard_requirements.safety_requirements`: whether a physical robot is required, allowed robot modes, motion risk, e-stop requirement, and supervision expectation.
-- `hard_requirements.data_requirements`: credentials or datasets required before execution.
-- `input_requirements[].constraints`: input ranges, length limits, formats, units, choices, or semantic role.
-- `action_servers[]`: action name, interface, goal/result/feedback fields, published/subscribed topics, services, TF frames, and side effects.
-
-Only objectively checkable fields should be hard filters. Free-form notes are useful for the LLM and user review, but they should not silently block a package unless the selector can verify them.
-
-The selector can verify required ROS graph entities from comma-separated environment variables when a manifest declares them:
-
-```bash
-export SKILL_ACQ_ROS_NODES="/camera_node,/planner"
-export SKILL_ACQ_ROS_TOPICS="/image,/tf"
-export SKILL_ACQ_ROS_SERVICES="/reset"
-export SKILL_ACQ_ROS_ACTIONS="/navigate_to_pose"
-```
-
-For `hard_requirements.data_requirements`, `requires_credentials` should list required environment variable names and `requires_datasets` should list dataset paths that must exist locally. Safety checks fail closed for `requires_physical_robot` unless `--robot-mode physical` is provided, and for `requires_estop` unless `--robot-has-estop true` is provided.
-
-## Selecting Without Running
-
-To inspect the selected target:
-
-```bash
-ros2 run skill_acq select_ros_target.py \
-  'reverse the string "hello"' \
-  --set publish_topic=/rev_string \
-  --top-k 3
-```
-
-For machine-readable output:
-
-```bash
-ros2 run skill_acq select_ros_target.py \
-  'reverse the string "hello"' \
-  --set publish_topic=/rev_string \
-  --json \
-  --top-k 1
-```
-
-Force deterministic catalog ranking:
-
-```bash
-ros2 run skill_acq select_ros_target.py \
-  'reverse the string "hello"' \
-  --set publish_topic=/rev_string \
-  --selection-backend catalog \
-  --top-k 3
-```
-
-Force OpenAI selection:
-
-```bash
-ros2 run skill_acq select_ros_target.py \
-  'reverse the string "hello"' \
-  --set publish_topic=/rev_string \
-  --selection-backend openai \
-  --json \
-  --top-k 1
-```
-
-## Installed Package Detection
-
-`run_ros_target.py` automatically checks whether the selected package is already installed in its runner workspace before building. There is no separate flag for this.
-
-The check is:
-
-1. Confirm the runner overlay exists at `<runner_ws>/install/setup.bash`.
-2. Source the runner overlay and run `ros2 pkg prefix <package_name>`.
-3. Compare the install stamp in `<runner_ws>/.skill_acq/` with the staged package source.
-
-This means it does not treat the source folder or an old install directory as "installed". A package source directory can exist while ROS still cannot use it, and a stale install can exist after the source has changed. The package is considered reusable only when the runner overlay can provide it and the source stamp still matches.
-
-## Cloud Installs And Catalog Updates
-
-When `run_ros_target.py` is called with `--source cloud`, it clones the repo, optionally fetches and checks out `--repo-ref`, builds the package, and updates the local catalog after a successful build. This makes newly installed cloud skills discoverable in later `skill_acq.py` runs.
-
-Cloud installs require network access for `git clone` and `git fetch`. If a clone directory already exists, the runner verifies that its `origin` URL matches the requested repo before reusing it. Catalog updates preserve existing package entries from the current catalog and add the newly installed cloud package instead of rebuilding from only the runner script directory.
-
-## Notes For Adding New Skills
-
-To add another skill package:
-
-1. Put a ROS package in the workspace or publish it as a cloneable repo.
-2. Add a schema version 3 `package_runner.json` at the package or repo root.
-3. Include discovery metadata, target metadata, required inputs, process startup commands, and client commands.
-4. Rebuild the catalog:
-
-```bash
-ros2 run skill_acq build_package_catalog.py --root /path/to/workspace
-```
-
-5. Test selection:
-
-```bash
-ros2 run skill_acq select_ros_target.py 'your natural language request' --top-k 3
-```
-
-6. Test execution:
-
-```bash
-ros2 run skill_acq skill_acq.py 'your natural language request'
-```
-
-## Current Example
-
-The hosted global catalog in `https://github.com/Nikkhil16/Demo` includes `reverse_string_action::reverse_string`, which:
-
-- starts the `/reverse_string` action server,
-- sends a string goal,
-- receives the reversed string as a result,
-- publishes the reversed string on the user-specified topic.
-
-On a fresh machine where the local catalog is empty, the first run should select this global entry, clone `https://github.com/Nikkhil16/reverse_string_action`, build it in the runner workspace, and then add it to the local catalog for later runs.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
