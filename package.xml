@@ -1,10 +1,11 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>skill_acq</name>
-  <version>0.0.0</version>
-  <description>Catalog-driven ROS skill acquisition and execution pipeline with local and global skill package registries.</description>
-  <maintainer email="nikhil@example.com">nikhil</maintainer>
-  <license>Apache-2.0</license>
+  <version>0.1.0</version>
+  <description>Platform-aware Runtime Skill Acquisition in ROS 2.</description>
+  <maintainer email="10.anjalirao@gmail.com">Anjali Rao</maintainer>
+  <maintainer email="nik.advani16@gmail.com">Nikhil Advani</maintainer>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
