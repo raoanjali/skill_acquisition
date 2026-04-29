@@ -13,22 +13,32 @@ The goal is simple: **turn a missing capability into a runnable ROS action at ru
 This repository currently reflects the **V0 prototype**, with foundational architecture developed to address dynamic skill loading. We are actively migrating the core acquisition loop toward the formal V1 capability contract model described below.
 
 * **Immediate Testing:** The `reverse_string_action` package serves as the minimal reproducible baseline for the fetch-build-validate pipeline.
-The reverse-string demo can run by using deterministic catalog selection. A local catalog database does not need to be checked into the repository; if `package_catalog.db` is missing, `skill_acq` creates an empty local catalog and then falls back to the global catalog.
+
+The reverse-string demo can run without an API key by using deterministic catalog selection. A local catalog database does not need to be checked into the repository; if `package_catalog.db` is missing, `skill_acq` creates an empty local catalog and then falls back to the global catalog.
+
+First, build and source this package from the root of your ROS 2 workspace:
+
+```bash
+source /opt/ros/$ROS_DISTRO/setup.bash
+colcon build --packages-select skill_acq
+source install/setup.bash
+```
 
 In one terminal, source ROS 2 and watch the output topic:
 
 ```bash
-source /opt/ros/$ROS_DISTRO/setup.bash
-ros2 topic echo /rev_string
+cd ~/ros2_ws
+source install/setup.bash
+ros2 topic echo /rev_string std_msgs/msg/String
 ```
 
 In another terminal, run acquisition and execution:
 
 ```bash
-cd ~/workspace/robotics_workspace
-source /opt/ros/$ROS_DISTRO/setup.bash
+cd ~/ros2_ws
+source install/setup.bash
 
-python3 skill_acq/scripts/skill_acq.py \
+ros2 run skill_acq skill_acq.py \
   'reverse the string "hello"' \
   --set input_string=hello \
   --set publish_topic=/rev_string \
