@@ -33,6 +33,7 @@ from package_catalog import (
     collect_system_profile,
     compatibility_reasons,
     compute_fts_scores,
+    ensure_catalog,
     hard_compatibility_reasons,
     load_global_catalog,
     load_all_targets,
@@ -821,6 +822,7 @@ def select_best_target(options: SelectionOptions) -> SelectionResult:
     )
 
     db_path = Path(options.db_path).resolve()
+    ensure_catalog(db_path)
     compatible: list[dict[str, Any]] = []
     incompatible: list[dict[str, Any]] = []
     if db_path.exists():

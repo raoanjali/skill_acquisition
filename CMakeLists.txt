@@ -17,10 +17,22 @@ install(PROGRAMS
 )
 
 install(FILES
-  global_package_catalog.json
-  package_catalog.db
   README.md
   DESTINATION share/${PROJECT_NAME}
 )
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/global_package_catalog.json")
+  install(FILES
+    global_package_catalog.json
+    DESTINATION share/${PROJECT_NAME}
+  )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/package_catalog.db")
+  install(FILES
+    package_catalog.db
+    DESTINATION share/${PROJECT_NAME}
+  )
+endif()
 
 ament_package()

@@ -277,7 +277,16 @@ def build_catalog(manifest_paths: list[Path], db_path: Path) -> tuple[int, int]:
         connection.close()
 
 
+def ensure_catalog(db_path: Path) -> None:
+    """Create an empty catalog database when one does not already exist."""
+
+    if db_path.exists():
+        return
+    build_catalog([], db_path)
+
+
 def open_catalog(db_path: Path) -> sqlite3.Connection:
+    ensure_catalog(db_path)
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     return connection
